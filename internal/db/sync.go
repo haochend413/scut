@@ -36,3 +36,8 @@ func (d *DB) LoadAll(scs []models.Shortcut) {
 		d.Conn.Save(&sc)
 	}
 }
+
+// This is actually a new thing to try: immediately delete with lazy save / insert
+func (d *DB) DeleteShortcut(id uint) error {
+	return d.Conn.Delete(&models.Shortcut{}, id).Error
+}

@@ -1,0 +1,923 @@
+================================================================================
+FILE: cmd/root.go
+================================================================================
+
+package cmd
+
+import (
+	"bufio"
+	"fmt"
+	"log"
+	"os"
+	"os/user"
+	"path/filepath"
+	"strings"
+
+	tea "charm.land/bubbletea/v2"
+
+	"github.com/haochend413/scut/config"
+	"github.com/haochend413/scut/internal/app"
+	"github.com/haochend413/scut/internal/db"
+	"github.com/haochend413/scut/internal/models"
+	"github.com/haochend413/scut/internal/ui"
+	"github.com/spf13/cobra"
+)
+
+func parseHistoryLine(line string) string {
+	if idx := strings.Index(line, ";"); idx != -1 {
+		return strings.TrimSpace(line[idx+1:])
+	}
+	return strings.TrimSpace(line)
+}
+
+var write string
+var addlast bool
+
+var globalCfg *config.Config
+var globalDB *db.DB
+var globalApp *app.App
+var globalModel *ui.Model
+
+var rootCmd = &cobra.Command{
+	Use:   "scut",
+	Short: "scut",
+	Long:  "scut",
+	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		cfg := config.LoadOrCreateConfig()
+		globalCfg = &cfg
+
+		dbPath := cfg.DataFilePath + "/shortcuts.db"
+
+		var err error
+		globalDB, err = db.NewDB(dbPath)
+		if err != nil {
+			log.Fatalf("Failed to connect to database %q: %v\n", dbPath, err)
+		}
+
+	},
+	Run: func(cmd *cobra.Command, args []string) {
+		// Initialize application with AppState
+		globalApp = app.NewApp(globalDB)
+
+		// write mode: scut -w "command"
+		if write != "" {
+			cwd, err := os.Getwd()
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			sc := models.Shortcut{
+				WorkDirectory: cwd,
+				Command:       write,
+			}
+
+			globalApp.AddShortcut(sc)
+			globalApp.OnClose()
+			return
+		}
+
+		// add latest mode: scut -l
+		if addlast {
+			cwd, err := os.Getwd()
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			u, err := user.Current()
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			historyPath := filepath.Join(u.HomeDir, ".zsh_history")
+			f, err := os.Open(historyPath)
+			if err != nil {
+				historyPath = filepath.Join(u.HomeDir, ".bash_history")
+				f, err = os.Open(historyPath)
+				if err != nil {
+					log.Fatal(err)
+				}
+			}
+			defer f.Close()
+
+			var last, secondLast string
+			scanner := bufio.NewScanner(f)
+			for scanner.Scan() {
+				line := strings.TrimSpace(scanner.Text())
+				if line != "" {
+					secondLast = last
+					last = line
+				}
+			}
+
+			if err := scanner.Err(); err != nil {
+				log.Fatal(err)
+			}
+
+			if secondLast == "" {
+				log.Fatal("history file does not have enough entries")
+			}
+
+			secondLastCmd := parseHistoryLine(secondLast)
+
+			shortcut := models.Shortcut{
+				WorkDirectory: cwd,
+				Command:       secondLastCmd,
+			}
+			globalApp.AddShortcut(shortcut)
+			globalApp.OnClose()
+			return
+		}
+
+		// default: launch UI
+		model := ui.NewModel(globalApp)
+		globalModel = &model
+
+		p := tea.NewProgram(model)
+		if _, err := p.Run(); err != nil {
+			log.Fatal(err)
+		}
+	},
+}
+
+func Execute() {
+	defer func() {
+		if globalDB != nil {
+			globalDB.Close()
+		}
+	}()
+
+	if err := rootCmd.Execute(); err != nil {
+		fmt.Fprintf(os.Stderr, "Oops. An error while executing Zero '%s'\n", err)
+		os.Exit(1)
+	}
+}
+
+func init() {
+	rootCmd.Flags().StringVarP(&write, "write", "w", "", "write command")
+	rootCmd.Flags().BoolVarP(&addlast, "last", "l", false, "add last command from shell history")
+}
+
+
+================================================================================
+FILE: config/config.go
+================================================================================
+
+package config
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+
+	"gopkg.in/yaml.v3"
+)
+
+type Config struct {
+	// program state storage
+	StateFilePath string
+	DataFilePath  string
+}
+
+func generateDefault() Config {
+	dataFilePath := DataFilePathDefault()
+	stateFilePath := StateFilePathDefault()
+
+	cfg := Config{
+		StateFilePath: stateFilePath,
+		DataFilePath:  dataFilePath,
+	}
+	return cfg
+}
+
+func LoadOrCreateConfig() Config {
+	path := ConfigPath()
+
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		// Config file doesn't exist, create directory and config file with defaults
+		dir := filepath.Dir(path)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			fmt.Fprintf(os.Stderr, "Error creating config directory: %v, using default\n", err)
+			return generateDefault()
+		}
+
+		cfg := generateDefault()
+		yamlData, err := yaml.Marshal(&cfg)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error marshaling default config: %v, using default\n", err)
+			return cfg
+		}
+
+		if err := os.WriteFile(path, yamlData, 0644); err != nil {
+			fmt.Fprintf(os.Stderr, "Error writing config file: %v, using default\n", err)
+			return cfg
+		}
+
+		return cfg
+	}
+
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error reading config file: %v, using default\n", err)
+		return generateDefault()
+	}
+
+	var cfg Config
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		fmt.Fprintf(os.Stderr, "Error parsing config file: %v, using default\n", err)
+		return generateDefault()
+	}
+
+	return cfg
+}
+
+// We need to provide handles for the users to change their configs.
+
+
+================================================================================
+FILE: config/defaults.go
+================================================================================
+
+package config
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
+)
+
+// Default STATE PATH for macOS
+// expandPath expands ~ to home directory
+// expandPath expands ~ and %APPDATA%
+func expandPath(path string) (string, error) {
+	// Windows env vars
+	if strings.Contains(path, "%APPDATA%") {
+		path = strings.ReplaceAll(path, "%APPDATA%", os.Getenv("APPDATA"))
+	}
+
+	// Unix ~
+	if len(path) > 0 && path[0] == '~' {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		if path == "~" {
+			return home, nil
+		}
+		path = filepath.Join(home, path[2:])
+	}
+
+	return path, nil
+}
+
+func BasePathDefault() (string, error) {
+	var path string
+
+	switch runtime.GOOS {
+	case "darwin":
+		path = "~/Library/Application Support/scut/"
+	case "linux":
+		path = "~/.local/state/scut/"
+	case "windows":
+		path = "%APPDATA%\\scut\\"
+	default:
+		fmt.Printf("unsupported OS: %s\n", runtime.GOOS)
+		expanded, _ := expandPath(path)
+		fmt.Printf("BasePathDefault: OS=%s, path=%s, expanded=%s\n", runtime.GOOS, path, expanded)
+		return "", fmt.Errorf("unsupported OS: %s", runtime.GOOS)
+	}
+
+	expanded, err := expandPath(path)
+	return expanded, err
+}
+
+// stateFilePath points to the state.json file
+func StateFilePathDefault() string {
+	basePath, _ := BasePathDefault()
+	return basePath + "/state.json"
+}
+
+// dataFilePathDefault points to the FOLDER that contains all the dbs.
+func DataFilePathDefault() string {
+	basePath, _ := BasePathDefault()
+	return basePath + "/db"
+}
+
+func ConfigPath() string {
+	basePath, _ := BasePathDefault()
+	return basePath + "/config.yaml"
+}
+
+
+================================================================================
+FILE: internal/app/app.go
+================================================================================
+
+package app
+
+import (
+	"github.com/haochend413/scut/internal/app/context"
+	"github.com/haochend413/scut/internal/app/shortcut"
+	"github.com/haochend413/scut/internal/db"
+	"github.com/haochend413/scut/internal/models"
+)
+
+type App struct {
+	ContextMgr  *context.ContextMgr
+	ShortcutMgr *shortcut.ShortcutMgr
+	DB          *db.DB
+}
+
+// initialize hepler
+func (a *App) init() {
+	a.ContextMgr.FetchContext()
+	data := a.DB.FetchAll()
+
+	// load data from DB
+	a.ShortcutMgr.RefreshFromDB(data)
+	// fetch context
+	a.ShortcutMgr.SetCWD(a.ContextMgr.DisplayWD())
+
+	// right now, shortcut and wd are in shortcutMgr, while history is in cotextmgr.
+}
+
+// close helper
+func (a *App) OnClose() {
+	// sync data to database
+	a.DB.LoadAll(a.ShortcutMgr.ExportValues())
+	// return
+}
+
+// constructor
+func NewApp(dbConn *db.DB) *App {
+	app := &App{
+		DB:          dbConn,
+		ContextMgr:  &context.ContextMgr{},
+		ShortcutMgr: &shortcut.ShortcutMgr{},
+	}
+	app.init()
+	return app
+}
+
+// APIs
+func (a *App) DisplayCWDShortcuts() []models.Shortcut {
+	// filter to values (convert []*models.Shortcut to []models.Shortcut)
+	ptrs := a.ShortcutMgr.DisplayCWDShortcuts()
+	values := make([]models.Shortcut, 0, len(ptrs))
+	for _, p := range ptrs {
+		if p != nil {
+			values = append(values, *p)
+		}
+	}
+	return values
+}
+
+func (a *App) AddShortcut(sc models.Shortcut) {
+	a.ShortcutMgr.AddShortcut(sc)
+}
+
+func (a *App) DeleteShortcut(id uint) {
+	a.ShortcutMgr.DeleteShortcut(id)
+}
+
+
+================================================================================
+FILE: internal/app/context/ctx.go
+================================================================================
+
+package context
+
+import (
+	"bufio"
+	"log"
+	"os"
+	"os/user"
+	"path/filepath"
+	"strings"
+)
+
+// Context includes working directory and current cmd history.
+type Context struct {
+	WorkingDirectory string
+	History          []string
+}
+
+type ContextMgr struct {
+	CurrentCtx *Context
+}
+
+func parseHistoryLine(line string) string {
+	// : 1774125697:0;git commit -m "msg"
+	if idx := strings.Index(line, ";"); idx != -1 {
+		return strings.TrimSpace(line[idx+1:])
+	}
+	return strings.TrimSpace(line)
+}
+
+func (cm *ContextMgr) FetchContext() {
+	if cm.CurrentCtx == nil {
+		cm.CurrentCtx = &Context{}
+	}
+
+	// get working directory
+	cwd, err := os.Getwd()
+	if err != nil {
+		log.Fatal(err)
+	}
+	cm.CurrentCtx.WorkingDirectory = cwd
+
+	cm.CurrentCtx.History = nil
+
+	// get history file
+	u, err := user.Current()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	historyPath := filepath.Join(u.HomeDir, ".zsh_history")
+	f, err := os.Open(historyPath)
+	if err != nil {
+		historyPath = filepath.Join(u.HomeDir, ".bash_history")
+		f, err = os.Open(historyPath)
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+	defer f.Close()
+
+	var all []string
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := scanner.Text()
+		cmd := parseHistoryLine(line)
+		if cmd != "" {
+			all = append(all, cmd)
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		log.Fatal(err)
+	}
+
+	// keep latest 50
+	if len(all) > 50 {
+		all = all[len(all)-50:]
+	}
+
+	cm.CurrentCtx.History = all
+}
+
+// display WD
+func (cm *ContextMgr) DisplayWD() string {
+	return cm.CurrentCtx.WorkingDirectory
+}
+
+// display history
+func (cm *ContextMgr) DisplayCmdHistory(l int) []string {
+	h := cm.CurrentCtx.History
+
+	if l <= 0 {
+		return []string{}
+	}
+
+	if l >= len(h) {
+		return h
+	}
+
+	return h[len(h)-l:]
+}
+
+
+================================================================================
+FILE: internal/app/shortcut/shortcut.go
+================================================================================
+
+package shortcut
+
+import (
+	"github.com/haochend413/scut/internal/models"
+)
+
+type ShortcutMgr struct {
+	WorkDirectory string
+	Shortcuts     []*models.Shortcut // This should be all the shortcuts. Since this is easier.
+	CWDShortcuts  []*models.Shortcut
+}
+
+// load stored from db
+func (sm *ShortcutMgr) RefreshFromDB(shortcuts []models.Shortcut) {
+	// fetch from db.
+	for i := range shortcuts {
+		sm.Shortcuts = append(sm.Shortcuts, &shortcuts[i])
+	}
+}
+
+// update workdir
+func (sm *ShortcutMgr) SetCWD(wd string) {
+	// fetch from db.
+	sm.WorkDirectory = wd
+	sm.UpdateCWDShortcuts()
+}
+
+func (sm *ShortcutMgr) UpdateCWDShortcuts() {
+	sm.CWDShortcuts = []*models.Shortcut{}
+	// loop through and get
+
+	for _, sc := range sm.Shortcuts {
+		if sc.WorkDirectory == sm.WorkDirectory {
+			sm.CWDShortcuts = append(sm.CWDShortcuts, sc)
+		}
+	}
+}
+
+// it might be better to just use value here. maybe.
+func (sm *ShortcutMgr) DisplayCWDShortcuts() []*models.Shortcut {
+	return sm.CWDShortcuts
+}
+
+func (sm *ShortcutMgr) GetSelectedShortCut(cursor int) *models.Shortcut {
+	if cursor < 0 || cursor >= len(sm.CWDShortcuts) {
+		return nil
+	}
+	return sm.CWDShortcuts[cursor]
+}
+
+// add a shortcut
+func (sm *ShortcutMgr) AddShortcut(sc models.Shortcut) {
+	// add shortcut
+	sm.Shortcuts = append(sm.Shortcuts, &sc)
+	sm.UpdateCWDShortcuts()
+}
+
+// delete a shortcut
+func (sm *ShortcutMgr) DeleteShortcut(id uint) {
+	// remove shortcut
+	for index, sc := range sm.Shortcuts {
+		if sc.ID == id {
+			//remove sc
+			sm.Shortcuts = append(sm.Shortcuts[:index], sm.Shortcuts[index+1:]...)
+			return
+		}
+	}
+}
+
+// for sync
+func (sm *ShortcutMgr) ExportValues() []models.Shortcut {
+	shortcut_val := []models.Shortcut{}
+	for _, sc := range sm.Shortcuts {
+		if sc != nil {
+			shortcut_val = append(shortcut_val, *sc)
+		}
+	}
+	return shortcut_val
+}
+
+
+================================================================================
+FILE: internal/db/db.go
+================================================================================
+
+package db
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+
+	"github.com/haochend413/scut/internal/models"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
+)
+
+// DB wraps the GORM database connection
+type DB struct {
+	Conn *gorm.DB
+}
+
+// NewDB initializes a new database connection and migrates schema
+func NewDB(path string) (*DB, error) {
+	// if not exist, create all dirs
+	_, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		// Config file doesn't exist, create directory and config file with defaults
+		dir := filepath.Dir(path)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			fmt.Fprintf(os.Stderr, "Error creating database directory: %v", err)
+			return nil, err
+		}
+
+	}
+
+	conn, err := gorm.Open(sqlite.Open(path), &gorm.Config{})
+	if err != nil {
+		return nil, err
+	}
+	// Migrate schema
+	err = conn.AutoMigrate(&models.Shortcut{})
+	if err != nil {
+		return nil, err
+	}
+	return &DB{Conn: conn}, nil
+}
+
+// Close closes the database connection
+func (d *DB) Close() error {
+	sqlDB, err := d.Conn.DB()
+	if err != nil {
+		return err
+	}
+	return sqlDB.Close()
+}
+
+
+================================================================================
+FILE: internal/db/sync.go
+================================================================================
+
+package db
+
+import "github.com/haochend413/scut/internal/models"
+
+// This functions sync the current data into DB and returns the synced data.
+func (d *DB) LoadAndFetchAll(scs []models.Shortcut) []models.Shortcut {
+	// Upsert all provided shortcuts
+	for _, sc := range scs {
+		d.Conn.Save(&sc)
+	}
+	// // Collect all IDs from input
+	// ids := make([]uint, 0, len(scs))
+	// for _, sc := range scs {
+	// 	ids = append(ids, sc.ID)
+	// }
+	// // Delete shortcuts not in the input list
+	// d.Conn.Where("id NOT IN ?", ids).Delete(&models.Shortcut{})
+
+	// Return the current list of shortcuts from DB
+	var synced []models.Shortcut
+	d.Conn.Find(&synced)
+	return synced
+}
+
+// fetch all data from db
+func (d *DB) FetchAll() []models.Shortcut {
+	// Return the current list of shortcuts from DB
+	var synced []models.Shortcut
+	d.Conn.Find(&synced)
+	return synced
+}
+
+// fetch all data from db
+func (d *DB) LoadAll(scs []models.Shortcut) {
+	for _, sc := range scs {
+		d.Conn.Save(&sc)
+	}
+}
+
+
+================================================================================
+FILE: internal/models/models.go
+================================================================================
+
+package models
+
+import "gorm.io/gorm"
+
+// maybe we can wait a bit to give a thought on this.
+type Shortcut struct {
+	gorm.Model    // This contains ID.
+	WorkDirectory string
+	Command       string // a list of commands to execute
+}
+
+
+================================================================================
+FILE: internal/ui/model.go
+================================================================================
+
+package ui
+
+import (
+	tea "charm.land/bubbletea/v2"
+	"github.com/haochend413/bubbles/v2/table"
+
+	// "github.com/haochend413/bubbles/v2/textinput"
+	"github.com/haochend413/scut/internal/app"
+	"github.com/haochend413/scut/internal/models"
+)
+
+type Model struct {
+	app             *app.App
+	shortcutTable   table.Model
+	currentShortcut *models.Shortcut
+}
+
+func NewModel(application *app.App) Model {
+	// init model
+	shortcut_column := []table.Column{
+		{Title: "   ", Width: 200},
+	}
+	shortcutTable := table.New(
+		table.WithColumns(shortcut_column),
+		table.WithFocused(true),
+		table.WithHeight(40),
+	)
+	curr := application.ShortcutMgr.GetSelectedShortCut(0)
+	m := Model{
+		app:             application,
+		shortcutTable:   shortcutTable,
+		currentShortcut: curr,
+	}
+	m.updateShortcutTable()
+	return m
+}
+
+// type tickMsg time.Time
+
+// func tick() tea.Cmd {
+// 	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
+// 		return tickMsg(t)
+// 	})
+// }
+
+// // Init initializes the Bubble Tea model
+func (m Model) Init() tea.Cmd {
+	// return tea.Batch(textinput.Blink, tick())
+	return nil
+}
+func (m *Model) RemoveCurrent() {
+	cursor := m.shortcutTable.Cursor()
+	m.app.DeleteShortcut(m.currentShortcut.ID)
+	new_cursor := max(0, cursor-1)
+	m.shortcutTable.SetCursor(new_cursor)
+	m.currentShortcut = m.app.ShortcutMgr.GetSelectedShortCut(new_cursor)
+	m.updateShortcutTable()
+}
+
+func (m *Model) updateShortcutTable() {
+	shortcuts := m.app.DisplayCWDShortcuts()
+
+	rows := make([]table.Row, 0, len(shortcuts))
+	for _, sc := range shortcuts {
+		rows = append(rows, table.Row{sc.Command})
+	}
+	m.shortcutTable.SetRows(rows)
+}
+
+
+================================================================================
+FILE: internal/ui/styles/tableStyle.go
+================================================================================
+
+package styles
+
+import (
+	"github.com/haochend413/bubbles/v2/table"
+	"github.com/haochend413/lipgloss/v2"
+)
+
+var TableStyle = table.Styles{
+	// Header: lipgloss.NewStyle().
+	// 	Bold(true).
+	// 	Padding(0, 0).
+	// 	Foreground(lipgloss.Color("252")),
+
+	// Cell: lipgloss.NewStyle().
+	// 	Padding(0, 0),
+	Selected: lipgloss.NewStyle().
+		Foreground(lipgloss.Color("46")),
+}
+
+
+================================================================================
+FILE: internal/ui/update.go
+================================================================================
+
+package ui
+
+import (
+	tea "charm.land/bubbletea/v2"
+	"github.com/haochend413/bubbles/v2/key"
+	"github.com/haochend413/bubbles/v2/table"
+	"github.com/haochend413/scut/internal/utils"
+)
+
+type keyMap struct {
+	Quit          key.Binding
+	Refresh       key.Binding
+	SelectAndQuit key.Binding
+	Delete        key.Binding
+}
+
+var keys = keyMap{
+	Quit:          key.NewBinding(key.WithKeys("ctrl+c", "q")),
+	Refresh:       key.NewBinding(key.WithKeys("r")),
+	SelectAndQuit: key.NewBinding(key.WithKeys("enter")),
+	Delete:        key.NewBinding(key.WithKeys("backspace")),
+}
+
+func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.shortcutTable.SetWidth(max(30, msg.Width-2))
+		m.shortcutTable.SetHeight(max(5, 5))
+		return m, nil
+
+	case tea.KeyMsg:
+		switch {
+		case key.Matches(msg, keys.Quit):
+			m.app.OnClose()
+			return m, tea.Quit
+
+		case key.Matches(msg, keys.Refresh):
+			m.updateShortcutTable()
+			return m, nil
+		case key.Matches(msg, keys.SelectAndQuit):
+			utils.CopyToClipboard(m.currentShortcut.Command)
+			m.app.OnClose()
+			return m, tea.Quit
+		case key.Matches(msg, keys.Delete):
+			m.RemoveCurrent()
+
+			return m, nil
+		}
+	case table.MoveSelectMsg:
+		// get the content shorcut. reset this for m.
+		cursor := m.shortcutTable.Cursor()
+		m.currentShortcut = m.app.ShortcutMgr.GetSelectedShortCut(cursor)
+		return m, nil
+	}
+
+	m.shortcutTable, cmd = m.shortcutTable.Update(msg)
+	return m, cmd
+}
+
+
+================================================================================
+FILE: internal/ui/view.go
+================================================================================
+
+package ui
+
+import (
+	tea "charm.land/bubbletea/v2"
+	"github.com/haochend413/lipgloss/v2"
+	"github.com/haochend413/scut/internal/ui/styles"
+)
+
+func (m Model) View() tea.View {
+	// currContent := ">>> " + m.currentShortcut.Command
+	m.shortcutTable.SetStyles(styles.TableStyle)
+	baseContent := lipgloss.JoinVertical(lipgloss.Top,
+		m.shortcutTable.View(),
+	)
+	v := tea.NewView(baseContent)
+	v.AltScreen = false
+	return v
+}
+
+
+================================================================================
+FILE: internal/utils/sys.go
+================================================================================
+
+package utils
+
+import "os/exec"
+
+func CopyToClipboard(s string) error {
+	cmd := exec.Command("pbcopy")
+	in, err := cmd.StdinPipe()
+	if err != nil {
+		return err
+	}
+
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+
+	if _, err := in.Write([]byte(s)); err != nil {
+		_ = in.Close()
+		return err
+	}
+	_ = in.Close()
+
+	return cmd.Wait()
+}
+
+
+================================================================================
+FILE: main.go
+================================================================================
+
+package main
+
+import "github.com/haochend413/scut/cmd"
+
+func main() {
+	cmd.Execute()
+}
+
+

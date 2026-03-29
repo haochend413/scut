@@ -60,3 +60,8 @@ func (a *App) DisplayCWDShortcuts() []models.Shortcut {
 func (a *App) AddShortcut(sc models.Shortcut) {
 	a.ShortcutMgr.AddShortcut(sc)
 }
+
+func (a *App) DeleteShortcut(id uint) {
+	a.ShortcutMgr.DeleteShortcut(id)
+	a.DB.DeleteShortcut(id)
+}

@@ -48,21 +48,14 @@ func (m Model) Init() tea.Cmd {
 	// return tea.Batch(textinput.Blink, tick())
 	return nil
 }
-
-// func (m *Model) updateShortcutTable() {
-// 	shortcuts := m.app.DisplayCWDShortcuts()
-// 	rows := make([]table.Row, 0, len(shortcuts))
-
-// 	for _, sc := range shortcuts {
-// 		cmdStr := sc.Command
-// 		row := table.Row{
-// 			fmt.Sprintf("%s", cmdStr),
-// 		}
-// 		rows = append(rows, row)
-// 	}
-
-// 	m.shortcutTable.SetRows(rows)
-// }
+func (m *Model) RemoveCurrent() {
+	cursor := m.shortcutTable.Cursor()
+	m.app.DeleteShortcut(m.currentShortcut.ID)
+	new_cursor := max(0, cursor-1)
+	m.shortcutTable.SetCursor(new_cursor)
+	m.currentShortcut = m.app.ShortcutMgr.GetSelectedShortCut(new_cursor)
+	m.updateShortcutTable()
+}
 
 func (m *Model) updateShortcutTable() {
 	shortcuts := m.app.DisplayCWDShortcuts()

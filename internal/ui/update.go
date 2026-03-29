@@ -11,12 +11,14 @@ type keyMap struct {
 	Quit          key.Binding
 	Refresh       key.Binding
 	SelectAndQuit key.Binding
+	Delete        key.Binding
 }
 
 var keys = keyMap{
 	Quit:          key.NewBinding(key.WithKeys("ctrl+c", "q")),
 	Refresh:       key.NewBinding(key.WithKeys("r")),
 	SelectAndQuit: key.NewBinding(key.WithKeys("enter")),
+	Delete:        key.NewBinding(key.WithKeys("backspace")),
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -41,6 +43,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			utils.CopyToClipboard(m.currentShortcut.Command)
 			m.app.OnClose()
 			return m, tea.Quit
+		case key.Matches(msg, keys.Delete):
+			m.RemoveCurrent()
+
+			return m, nil
 		}
 	case table.MoveSelectMsg:
 		// get the content shorcut. reset this for m.

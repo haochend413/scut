@@ -62,6 +62,7 @@ func (sm *ShortcutMgr) DeleteShortcut(id uint) {
 		if sc.ID == id {
 			//remove sc
 			sm.Shortcuts = append(sm.Shortcuts[:index], sm.Shortcuts[index+1:]...)
+			sm.UpdateCWDShortcuts()
 			return
 		}
 	}
