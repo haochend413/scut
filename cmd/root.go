@@ -113,7 +113,6 @@ var rootCmd = &cobra.Command{
 			}
 
 			lastCmd := parseHistoryLine(last)
-			log.Println("last command:", lastCmd)
 
 			shortcut := models.Shortcut{
 				WorkDirectory: cwd,

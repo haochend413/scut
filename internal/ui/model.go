@@ -6,26 +6,30 @@ import (
 
 	// "github.com/haochend413/bubbles/v2/textinput"
 	"github.com/haochend413/scut/internal/app"
+	"github.com/haochend413/scut/internal/models"
 )
 
 type Model struct {
-	app           *app.App
-	shortcutTable table.Model
+	app             *app.App
+	shortcutTable   table.Model
+	currentShortcut *models.Shortcut
 }
 
 func NewModel(application *app.App) Model {
 	// init model
 	shortcut_column := []table.Column{
-		{Title: "cmds", Width: 50},
+		{Title: "   ", Width: 200},
 	}
 	shortcutTable := table.New(
 		table.WithColumns(shortcut_column),
 		table.WithFocused(true),
 		table.WithHeight(40),
 	)
+	curr := application.ShortcutMgr.GetSelectedShortCut(0)
 	m := Model{
-		app:           application,
-		shortcutTable: shortcutTable,
+		app:             application,
+		shortcutTable:   shortcutTable,
+		currentShortcut: curr,
 	}
 	m.updateShortcutTable()
 	return m

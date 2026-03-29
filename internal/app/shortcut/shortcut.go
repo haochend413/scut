@@ -1,8 +1,6 @@
 package shortcut
 
 import (
-	"fmt"
-
 	"github.com/haochend413/scut/internal/models"
 )
 
@@ -30,7 +28,6 @@ func (sm *ShortcutMgr) SetCWD(wd string) {
 func (sm *ShortcutMgr) UpdateCWDShortcuts() {
 	sm.CWDShortcuts = []*models.Shortcut{}
 	// loop through and get
-	fmt.Printf("current wd: %q\n", sm.WorkDirectory)
 
 	for _, sc := range sm.Shortcuts {
 		if sc.WorkDirectory == sm.WorkDirectory {
@@ -42,6 +39,13 @@ func (sm *ShortcutMgr) UpdateCWDShortcuts() {
 // it might be better to just use value here. maybe.
 func (sm *ShortcutMgr) DisplayCWDShortcuts() []*models.Shortcut {
 	return sm.CWDShortcuts
+}
+
+func (sm *ShortcutMgr) GetSelectedShortCut(cursor int) *models.Shortcut {
+	if cursor < 0 || cursor >= len(sm.CWDShortcuts) {
+		return nil
+	}
+	return sm.CWDShortcuts[cursor]
 }
 
 // add a shortcut
