@@ -95,11 +95,12 @@ var rootCmd = &cobra.Command{
 			}
 			defer f.Close()
 
-			var last string
+			var last, secondLast string
 			scanner := bufio.NewScanner(f)
 			for scanner.Scan() {
 				line := strings.TrimSpace(scanner.Text())
 				if line != "" {
+					secondLast = last
 					last = line
 				}
 			}
@@ -108,15 +109,15 @@ var rootCmd = &cobra.Command{
 				log.Fatal(err)
 			}
 
-			if last == "" {
-				log.Fatal("history file is empty")
+			if secondLast == "" {
+				log.Fatal("history file does not have enough entries")
 			}
 
-			lastCmd := parseHistoryLine(last)
+			secondLastCmd := parseHistoryLine(secondLast)
 
 			shortcut := models.Shortcut{
 				WorkDirectory: cwd,
-				Command:       lastCmd,
+				Command:       secondLastCmd,
 			}
 			globalApp.AddShortcut(shortcut)
 			globalApp.OnClose()
