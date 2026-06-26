@@ -58,18 +58,31 @@ func (cm *ContextMgr) FetchContext() {
 	}
 	defer f.Close()
 
-	var all []string
+	var rawLines []string
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
-		line := scanner.Text()
-		cmd := parseHistoryLine(line)
+		rawLines = append(rawLines, scanner.Text())
+	}
+	if err := scanner.Err(); err != nil {
+		log.Fatal(err)
+	}
+
+	var all []string
+	for i := 0; i < len(rawLines); i++ {
+		cmd := parseHistoryLine(rawLines[i])
+		// Join shell continuation lines (lines ending with \).
+		for strings.HasSuffix(cmd, "\\") && i+1 < len(rawLines) {
+			next := rawLines[i+1]
+			// Stop if the next line starts a new history entry (zsh extended format).
+			if strings.HasPrefix(next, ": ") && strings.Contains(next, ";") {
+				break
+			}
+			i++
+			cmd = strings.TrimSuffix(cmd, "\\") + strings.TrimSpace(parseHistoryLine(next))
+		}
 		if cmd != "" {
 			all = append(all, cmd)
 		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		log.Fatal(err)
 	}
 
 	// keep latest 50

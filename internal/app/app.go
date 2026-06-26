@@ -1,6 +1,9 @@
 package app
 
 import (
+	"fmt"
+	"strings"
+
 	"github.com/haochend413/scut/internal/app/context"
 	"github.com/haochend413/scut/internal/app/shortcut"
 	"github.com/haochend413/scut/internal/db"
@@ -13,27 +16,15 @@ type App struct {
 	DB          *db.DB
 }
 
-// initialize hepler
 func (a *App) init() {
 	a.ContextMgr.FetchContext()
 	data := a.DB.FetchAll()
-
-	// load data from DB
 	a.ShortcutMgr.RefreshFromDB(data)
-	// fetch context
 	a.ShortcutMgr.SetCWD(a.ContextMgr.DisplayWD())
-
-	// right now, shortcut and wd are in shortcutMgr, while history is in cotextmgr.
 }
 
-// close helper
-func (a *App) OnClose() {
-	// sync data to database
-	a.DB.LoadAll(a.ShortcutMgr.ExportValues())
-	// return
-}
+func (a *App) OnClose() {}
 
-// constructor
 func NewApp(dbConn *db.DB) *App {
 	app := &App{
 		DB:          dbConn,
@@ -44,9 +35,27 @@ func NewApp(dbConn *db.DB) *App {
 	return app
 }
 
-// APIs
+func (a *App) GetCWD() string {
+	return a.ContextMgr.DisplayWD()
+}
+
+// GetHistory returns recent shell commands, most-recent-first, deduped and with scut calls filtered out.
+func (a *App) GetHistory() []string {
+	all := a.ContextMgr.DisplayCmdHistory(100)
+	seen := make(map[string]bool)
+	result := make([]string, 0, len(all))
+	for i := len(all) - 1; i >= 0; i-- {
+		cmd := all[i]
+		if strings.HasPrefix(cmd, "scut") || seen[cmd] {
+			continue
+		}
+		seen[cmd] = true
+		result = append(result, cmd)
+	}
+	return result
+}
+
 func (a *App) DisplayCWDShortcuts() []models.Shortcut {
-	// filter to values (convert []*models.Shortcut to []models.Shortcut)
 	ptrs := a.ShortcutMgr.DisplayCWDShortcuts()
 	values := make([]models.Shortcut, 0, len(ptrs))
 	for _, p := range ptrs {
@@ -57,11 +66,19 @@ func (a *App) DisplayCWDShortcuts() []models.Shortcut {
 	return values
 }
 
-func (a *App) AddShortcut(sc models.Shortcut) {
-	a.ShortcutMgr.AddShortcut(sc)
+func (a *App) AddShortcut(sc models.Shortcut) error {
+	if a.ShortcutMgr.HasShortcut(sc.Command, sc.WorkDirectory) {
+		return fmt.Errorf("shortcut already exists")
+	}
+	inserted, err := a.DB.InsertShortcut(sc)
+	if err != nil {
+		return err
+	}
+	a.ShortcutMgr.AddShortcut(inserted)
+	return nil
 }
 
 func (a *App) DeleteShortcut(id uint) {
 	a.ShortcutMgr.DeleteShortcut(id)
-	a.DB.DeleteShortcut(id)
+	_ = a.DB.DeleteShortcut(id)
 }

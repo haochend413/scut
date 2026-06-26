@@ -32,12 +32,11 @@ var addlast bool
 var globalCfg *config.Config
 var globalDB *db.DB
 var globalApp *app.App
-var globalModel *ui.Model
 
 var rootCmd = &cobra.Command{
 	Use:   "scut",
-	Short: "scut",
-	Long:  "scut",
+	Short: "scut — per-directory command shortcut manager",
+	Long:  "scut — per-directory command shortcut manager",
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		cfg := config.LoadOrCreateConfig()
 		globalCfg = &cfg
@@ -49,10 +48,8 @@ var rootCmd = &cobra.Command{
 		if err != nil {
 			log.Fatalf("Failed to connect to database %q: %v\n", dbPath, err)
 		}
-
 	},
 	Run: func(cmd *cobra.Command, args []string) {
-		// Initialize application with AppState
 		globalApp = app.NewApp(globalDB)
 
 		// write mode: scut -w "command"
@@ -61,18 +58,14 @@ var rootCmd = &cobra.Command{
 			if err != nil {
 				log.Fatal(err)
 			}
-
-			sc := models.Shortcut{
-				WorkDirectory: cwd,
-				Command:       write,
+			sc := models.Shortcut{WorkDirectory: cwd, Command: write}
+			if err := globalApp.AddShortcut(sc); err != nil {
+				fmt.Fprintf(os.Stderr, "scut: %v\n", err)
 			}
-
-			globalApp.AddShortcut(sc)
-			globalApp.OnClose()
 			return
 		}
 
-		// add latest mode: scut -l
+		// add-last mode: scut -l
 		if addlast {
 			cwd, err := os.Getwd()
 			if err != nil {
@@ -104,30 +97,25 @@ var rootCmd = &cobra.Command{
 					last = line
 				}
 			}
-
 			if err := scanner.Err(); err != nil {
 				log.Fatal(err)
 			}
-
 			if secondLast == "" {
 				log.Fatal("history file does not have enough entries")
 			}
 
-			secondLastCmd := parseHistoryLine(secondLast)
-
-			shortcut := models.Shortcut{
+			sc := models.Shortcut{
 				WorkDirectory: cwd,
-				Command:       secondLastCmd,
+				Command:       parseHistoryLine(secondLast),
 			}
-			globalApp.AddShortcut(shortcut)
-			globalApp.OnClose()
+			if err := globalApp.AddShortcut(sc); err != nil {
+				fmt.Fprintf(os.Stderr, "scut: %v\n", err)
+			}
 			return
 		}
 
-		// default: launch UI
+		// default: launch TUI
 		model := ui.NewModel(globalApp)
-		globalModel = &model
-
 		p := tea.NewProgram(model)
 		if _, err := p.Run(); err != nil {
 			log.Fatal(err)
@@ -143,12 +131,12 @@ func Execute() {
 	}()
 
 	if err := rootCmd.Execute(); err != nil {
-		fmt.Fprintf(os.Stderr, "Oops. An error while executing Zero '%s'\n", err)
+		fmt.Fprintf(os.Stderr, "scut: %s\n", err)
 		os.Exit(1)
 	}
 }
 
 func init() {
-	rootCmd.Flags().StringVarP(&write, "write", "w", "", "write command")
-	rootCmd.Flags().BoolVarP(&addlast, "last", "l", false, "add last command from shell history")
+	rootCmd.Flags().StringVarP(&write, "write", "w", "", "save a command to the current directory")
+	rootCmd.Flags().BoolVarP(&addlast, "last", "l", false, "save the previous shell command")
 }

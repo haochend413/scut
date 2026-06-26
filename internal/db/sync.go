@@ -2,42 +2,17 @@ package db
 
 import "github.com/haochend413/scut/internal/models"
 
-// This functions sync the current data into DB and returns the synced data.
-func (d *DB) LoadAndFetchAll(scs []models.Shortcut) []models.Shortcut {
-	// Upsert all provided shortcuts
-	for _, sc := range scs {
-		d.Conn.Save(&sc)
-	}
-	// // Collect all IDs from input
-	// ids := make([]uint, 0, len(scs))
-	// for _, sc := range scs {
-	// 	ids = append(ids, sc.ID)
-	// }
-	// // Delete shortcuts not in the input list
-	// d.Conn.Where("id NOT IN ?", ids).Delete(&models.Shortcut{})
-
-	// Return the current list of shortcuts from DB
-	var synced []models.Shortcut
-	d.Conn.Find(&synced)
-	return synced
+func (d *DB) InsertShortcut(sc models.Shortcut) (models.Shortcut, error) {
+	result := d.Conn.Create(&sc)
+	return sc, result.Error
 }
 
-// fetch all data from db
 func (d *DB) FetchAll() []models.Shortcut {
-	// Return the current list of shortcuts from DB
-	var synced []models.Shortcut
-	d.Conn.Find(&synced)
-	return synced
+	var shortcuts []models.Shortcut
+	d.Conn.Find(&shortcuts)
+	return shortcuts
 }
 
-// fetch all data from db
-func (d *DB) LoadAll(scs []models.Shortcut) {
-	for _, sc := range scs {
-		d.Conn.Save(&sc)
-	}
-}
-
-// This is actually a new thing to try: immediately delete with lazy save / insert
 func (d *DB) DeleteShortcut(id uint) error {
 	return d.Conn.Delete(&models.Shortcut{}, id).Error
 }
