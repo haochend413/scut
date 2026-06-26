@@ -48,7 +48,7 @@ func (m Model) mainView() string {
 	if len(m.shortcuts) == 0 {
 		body = emptyStyle.Render("  (no shortcuts yet)")
 	} else {
-		body = m.shortcutTable.View()
+		body = dropHeader(m.shortcutTable.View())
 	}
 
 	hints := hintStyle.Render("  a add  h history  ⌫ delete  ↵ copy  q quit")
@@ -62,7 +62,7 @@ func (m Model) historyView() string {
 	if len(m.history) == 0 {
 		body = emptyStyle.Render("  (no history found)")
 	} else {
-		body = m.historyTable.View()
+		body = dropHeader(m.historyTable.View())
 	}
 
 	hints := hintStyle.Render("  ↵ save to shortcuts  esc/q back")
@@ -76,12 +76,20 @@ func (m Model) inputView() string {
 	if len(m.shortcuts) == 0 {
 		body = emptyStyle.Render("  (no shortcuts yet)")
 	} else {
-		body = m.shortcutTable.View()
+		body = dropHeader(m.shortcutTable.View())
 	}
 
 	inputLine := hintStyle.Render("  > ") + m.input.View()
 	hints := hintStyle.Render("  ↵ save  esc cancel")
 	return lipgloss.JoinVertical(lipgloss.Left, title, body, inputLine, hints)
+}
+
+// dropHeader removes the blank header row that the table always prepends.
+func dropHeader(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return s[i+1:]
+	}
+	return s
 }
 
 func shortenPath(p string) string {
