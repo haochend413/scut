@@ -64,3 +64,12 @@ func (sm *ShortcutMgr) DeleteShortcut(id uint) {
 		}
 	}
 }
+
+func (sm *ShortcutMgr) UpdateShortcut(id uint, newCommand string) {
+	for _, sc := range sm.Shortcuts {
+		if sc.ID == id {
+			sc.Command = newCommand
+			return
+		}
+	}
+}

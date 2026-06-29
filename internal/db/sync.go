@@ -16,3 +16,7 @@ func (d *DB) FetchAll() []models.Shortcut {
 func (d *DB) DeleteShortcut(id uint) error {
 	return d.Conn.Delete(&models.Shortcut{}, id).Error
 }
+
+func (d *DB) UpdateShortcut(id uint, newCommand string) error {
+	return d.Conn.Model(&models.Shortcut{}).Where("id = ?", id).Update("command", newCommand).Error
+}

@@ -85,11 +85,6 @@ func (cm *ContextMgr) FetchContext() {
 		}
 	}
 
-	// keep latest 50
-	if len(all) > 50 {
-		all = all[len(all)-50:]
-	}
-
 	cm.CurrentCtx.History = all
 }
 

@@ -41,7 +41,7 @@ func (a *App) GetCWD() string {
 
 // GetHistory returns recent shell commands, most-recent-first, deduped and with scut calls filtered out.
 func (a *App) GetHistory() []string {
-	all := a.ContextMgr.DisplayCmdHistory(100)
+	all := a.ContextMgr.CurrentCtx.History
 	seen := make(map[string]bool)
 	result := make([]string, 0, len(all))
 	for i := len(all) - 1; i >= 0; i-- {
@@ -81,4 +81,12 @@ func (a *App) AddShortcut(sc models.Shortcut) error {
 func (a *App) DeleteShortcut(id uint) {
 	a.ShortcutMgr.DeleteShortcut(id)
 	_ = a.DB.DeleteShortcut(id)
+}
+
+func (a *App) UpdateShortcut(id uint, newCommand string) error {
+	if err := a.DB.UpdateShortcut(id, newCommand); err != nil {
+		return err
+	}
+	a.ShortcutMgr.UpdateShortcut(id, newCommand)
+	return nil
 }

@@ -32,6 +32,8 @@ func (m Model) View() tea.View {
 		content = m.historyView()
 	case modeInput:
 		content = m.inputView()
+	case modeEdit:
+		content = m.editView()
 	default:
 		content = m.mainView()
 	}
@@ -51,22 +53,26 @@ func (m Model) mainView() string {
 		body = dropHeader(m.shortcutTable.View())
 	}
 
-	hints := hintStyle.Render("  a add  h history  ⌫ delete  ↵ copy  q quit")
+	hints := hintStyle.Render("  a add  i edit  h history  ⌫ delete  ↵ copy  q quit")
 	return lipgloss.JoinVertical(lipgloss.Left, title, body, hints)
 }
 
 func (m Model) historyView() string {
 	title := titleStyle.Render("scut") + "  " + dimStyle.Render("shell history")
 
+	searchLine := hintStyle.Render("  / ") + m.historySearch.View()
+
 	var body string
 	if len(m.history) == 0 {
 		body = emptyStyle.Render("  (no history found)")
+	} else if len(m.filteredHistory) == 0 {
+		body = emptyStyle.Render("  (no matches)")
 	} else {
 		body = dropHeader(m.historyTable.View())
 	}
 
-	hints := hintStyle.Render("  ↵ save to shortcuts  esc/q back")
-	return lipgloss.JoinVertical(lipgloss.Left, title, body, hints)
+	hints := hintStyle.Render("  ↑↓ navigate  ↵ save to shortcuts  esc back")
+	return lipgloss.JoinVertical(lipgloss.Left, title, searchLine, body, hints)
 }
 
 func (m Model) inputView() string {
@@ -80,6 +86,21 @@ func (m Model) inputView() string {
 	}
 
 	inputLine := hintStyle.Render("  > ") + m.input.View()
+	hints := hintStyle.Render("  ↵ save  esc cancel")
+	return lipgloss.JoinVertical(lipgloss.Left, title, body, inputLine, hints)
+}
+
+func (m Model) editView() string {
+	title := titleStyle.Render("scut") + "  " + dimStyle.Render(shortenPath(m.app.GetCWD()))
+
+	var body string
+	if len(m.shortcuts) == 0 {
+		body = emptyStyle.Render("  (no shortcuts yet)")
+	} else {
+		body = dropHeader(m.shortcutTable.View())
+	}
+
+	inputLine := hintStyle.Render("  edit > ") + m.input.View()
 	hints := hintStyle.Render("  ↵ save  esc cancel")
 	return lipgloss.JoinVertical(lipgloss.Left, title, body, inputLine, hints)
 }

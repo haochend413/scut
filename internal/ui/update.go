@@ -16,11 +16,12 @@ var (
 	escKey       = key.NewBinding(key.WithKeys("esc"))
 	enterKey     = key.NewBinding(key.WithKeys("enter"))
 	mainQuitKey  = key.NewBinding(key.WithKeys("ctrl+c", "q"))
-	histBackKey  = key.NewBinding(key.WithKeys("esc", "q"))
 	backspaceKey = key.NewBinding(key.WithKeys("backspace"))
 	addKey       = key.NewBinding(key.WithKeys("a"))
+	editKey      = key.NewBinding(key.WithKeys("i"))
 	histKey      = key.NewBinding(key.WithKeys("h"))
 	refreshKey   = key.NewBinding(key.WithKeys("r"))
+	tableNavKey  = key.NewBinding(key.WithKeys("up", "down", "pgup", "pgdown"))
 )
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -30,10 +31,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		w := max(20, msg.Width-4)
-		m.shortcutTable.SetWidth(w)
-		m.historyTable.SetWidth(w)
-		m.input.SetWidth(w)
+		col := table.Column{Title: "", Width: msg.Width}
+		m.shortcutTable.SetColumns([]table.Column{col})
+		m.historyTable.SetColumns([]table.Column{col})
+		m.shortcutTable.SetWidth(msg.Width)
+		m.historyTable.SetWidth(msg.Width)
+		m.input.SetWidth(msg.Width)
+		m.historySearch.SetWidth(msg.Width)
 		tableH := min(10, max(5, msg.Height/3))
 		m.shortcutTable.SetHeight(tableH)
 		m.historyTable.SetHeight(tableH)
@@ -45,6 +49,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		switch m.mode {
+
+		case modeEdit:
+			switch {
+			case key.Matches(msg, ctrlCKey):
+				m.quitting = true
+				return m, tea.Quit
+			case key.Matches(msg, escKey):
+				m.mode = modeMain
+				m.input.Blur()
+				m.input.SetValue("")
+				m.editingID = 0
+				return m, nil
+			case key.Matches(msg, enterKey):
+				if v := m.input.Value(); v != "" && m.editingID != 0 {
+					cursor := m.shortcutTable.Cursor()
+					_ = m.app.UpdateShortcut(m.editingID, v)
+					m.refreshShortcuts()
+					m.shortcutTable.SetCursor(cursor)
+				}
+				m.mode = modeMain
+				m.input.Blur()
+				m.input.SetValue("")
+				m.editingID = 0
+				return m, nil
+			}
+			m.input, cmd = m.input.Update(msg)
+			return m, cmd
 
 		case modeInput:
 			switch {
@@ -76,8 +107,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case key.Matches(msg, ctrlCKey):
 				m.quitting = true
 				return m, tea.Quit
-			case key.Matches(msg, histBackKey):
+			case key.Matches(msg, escKey):
+				if m.historySearch.Value() != "" {
+					m.historySearch.SetValue("")
+					m.applyHistoryFilter()
+					return m, nil
+				}
 				m.mode = modeMain
+				m.historySearch.Blur()
 				return m, nil
 			case key.Matches(msg, enterKey):
 				if h := m.selectedHistoryCmd(); h != "" {
@@ -86,10 +123,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.refreshShortcuts()
 					m.shortcutTable.SetCursor(len(m.shortcuts) - 1)
 					m.mode = modeMain
+					m.historySearch.SetValue("")
+					m.historySearch.Blur()
+					m.applyHistoryFilter()
 				}
 				return m, nil
+			case key.Matches(msg, tableNavKey):
+				m.historyTable, cmd = m.historyTable.Update(msg)
+				return m, cmd
 			}
-			m.historyTable, cmd = m.historyTable.Update(msg)
+			// All other keys go to the search input.
+			m.historySearch, cmd = m.historySearch.Update(msg)
+			m.applyHistoryFilter()
 			return m, cmd
 
 		default: // modeMain
@@ -118,9 +163,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.mode = modeInput
 				focusCmd := m.input.Focus()
 				return m, tea.Batch(focusCmd, textinput.Blink)
+			case key.Matches(msg, editKey):
+				if sc := m.selectedShortcut(); sc != nil {
+					m.editingID = sc.ID
+					m.input.SetValue(sc.Command)
+					m.input.CursorEnd()
+					m.mode = modeEdit
+					focusCmd := m.input.Focus()
+					return m, tea.Batch(focusCmd, textinput.Blink)
+				}
 			case key.Matches(msg, histKey):
 				m.mode = modeHistory
-				return m, nil
+				m.refreshHistory()
+				focusCmd := m.historySearch.Focus()
+				return m, tea.Batch(focusCmd, textinput.Blink)
 			case key.Matches(msg, refreshKey):
 				m.refreshShortcuts()
 				m.refreshHistory()
@@ -133,10 +189,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Non-key messages: forward to the active component.
 	switch m.mode {
-	case modeInput:
+	case modeInput, modeEdit:
 		m.input, cmd = m.input.Update(msg)
 	case modeHistory:
-		m.historyTable, cmd = m.historyTable.Update(msg)
+		m.historySearch, cmd = m.historySearch.Update(msg)
 	default:
 		m.shortcutTable, cmd = m.shortcutTable.Update(msg)
 	}
