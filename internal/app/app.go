@@ -90,3 +90,12 @@ func (a *App) UpdateShortcut(id uint, newCommand string) error {
 	a.ShortcutMgr.UpdateShortcut(id, newCommand)
 	return nil
 }
+
+func (a *App) DuplicateShortcut(sc models.Shortcut) (models.Shortcut, error) {
+	inserted, err := a.DB.InsertShortcut(sc)
+	if err != nil {
+		return models.Shortcut{}, err
+	}
+	a.ShortcutMgr.AddShortcut(inserted)
+	return inserted, nil
+}

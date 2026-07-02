@@ -53,7 +53,7 @@ func (m Model) mainView() string {
 		body = dropHeader(m.shortcutTable.View())
 	}
 
-	hints := hintStyle.Render("  a add  i edit  h history  ⌫ delete  ↵ copy  q quit")
+	hints := hintStyle.Render("  a add  d dup  i edit  h history  ⌫ delete  ↵ copy  ^c quit")
 	return lipgloss.JoinVertical(lipgloss.Left, title, body, hints)
 }
 

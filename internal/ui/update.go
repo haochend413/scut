@@ -15,9 +15,9 @@ var (
 	ctrlCKey     = key.NewBinding(key.WithKeys("ctrl+c"))
 	escKey       = key.NewBinding(key.WithKeys("esc"))
 	enterKey     = key.NewBinding(key.WithKeys("enter"))
-	mainQuitKey  = key.NewBinding(key.WithKeys("ctrl+c", "q"))
 	backspaceKey = key.NewBinding(key.WithKeys("backspace"))
 	addKey       = key.NewBinding(key.WithKeys("a"))
+	dupKey       = key.NewBinding(key.WithKeys("d"))
 	editKey      = key.NewBinding(key.WithKeys("i"))
 	histKey      = key.NewBinding(key.WithKeys("h"))
 	refreshKey   = key.NewBinding(key.WithKeys("r"))
@@ -139,7 +139,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		default: // modeMain
 			switch {
-			case key.Matches(msg, mainQuitKey):
+			case key.Matches(msg, ctrlCKey):
 				m.quitting = true
 				return m, tea.Quit
 			case key.Matches(msg, enterKey):
@@ -163,6 +163,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.mode = modeInput
 				focusCmd := m.input.Focus()
 				return m, tea.Batch(focusCmd, textinput.Blink)
+			case key.Matches(msg, dupKey):
+				if sc := m.selectedShortcut(); sc != nil {
+					cursor := m.shortcutTable.Cursor()
+					cwd, _ := os.Getwd()
+					inserted, err := m.app.DuplicateShortcut(models.Shortcut{WorkDirectory: cwd, Command: sc.Command})
+					if err == nil {
+						newList := make([]models.Shortcut, 0, len(m.shortcuts)+1)
+						newList = append(newList, m.shortcuts[:cursor+1]...)
+						newList = append(newList, inserted)
+						newList = append(newList, m.shortcuts[cursor+1:]...)
+						m.shortcuts = newList
+						rows := make([]table.Row, 0, len(m.shortcuts))
+						for _, s := range m.shortcuts {
+							rows = append(rows, table.Row{s.Command})
+						}
+						m.shortcutTable.SetRows(rows)
+						m.shortcutTable.SetCursor(cursor + 1)
+					}
+				}
+				return m, nil
 			case key.Matches(msg, editKey):
 				if sc := m.selectedShortcut(); sc != nil {
 					m.editingID = sc.ID
